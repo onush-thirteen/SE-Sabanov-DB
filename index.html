@@ -392,6 +392,11 @@ function defaultData(){
       'Продукты':120000,'Транспорт':40000,'Жильё и коммуналка':90000,'Кафе и рестораны':30000,
       'Развлечения':20000,'Одежда':20000,'Здоровье':15000,'Связь и интернет':12000,'Прочее':15000
     },
+    budgetKind:{
+      'Зарплата':'income','Подработка':'income',
+      'Продукты':'expense','Транспорт':'expense','Жильё и коммуналка':'expense','Кафе и рестораны':'expense',
+      'Развлечения':'expense','Одежда':'expense','Здоровье':'expense','Связь и интернет':'expense','Прочее':'expense'
+    },
     netWorthHistory: nwHistory
   };
 }
@@ -406,8 +411,17 @@ function load(){
   if(!DB.netWorthHistory) DB.netWorthHistory=[];
   if(!DB.assets) DB.assets=[];
   if(!DB.goals) DB.goals=[];
+  if(!DB.budget) DB.budget={};
+  if(!DB.budgetKind){
+    DB.budgetKind={};
+    Object.keys(DB.budget).forEach(function(k){ DB.budgetKind[k] = INCOME_CATEGORIES.indexOf(k)>=0 ? 'income' : 'expense'; });
+  }
   ensureSnapshot();
   save();
+}
+function budgetKind(cat){
+  if(DB.budgetKind && DB.budgetKind[cat]) return DB.budgetKind[cat];
+  return INCOME_CATEGORIES.indexOf(cat)>=0 ? 'income' : 'expense';
 }
 function save(){
   try{ localStorage.setItem(LS_DATA_KEY, JSON.stringify(DB)); }catch(e){}
@@ -493,12 +507,12 @@ function avgMonthlyIncome(){
   if(DB.settings.manualMonthlyIncome>0) return DB.settings.manualMonthlyIncome;
   var v = monthsWithData('income',3);
   if(v!=null) return v;
-  return Object.keys(DB.budget).filter(function(k){return INCOME_CATEGORIES.indexOf(k)>=0;}).reduce(function(s,k){return s+DB.budget[k];},0);
+  return Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='income';}).reduce(function(s,k){return s+DB.budget[k];},0);
 }
 function avgMonthlyExpense(){
   var v = monthsWithData('expense',3);
   if(v!=null) return v;
-  return Object.keys(DB.budget).filter(function(k){return EXPENSE_CATEGORIES.indexOf(k)>=0;}).reduce(function(s,k){return s+DB.budget[k];},0);
+  return Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='expense';}).reduce(function(s,k){return s+DB.budget[k];},0);
 }
 
 function debtLoad(){
@@ -575,7 +589,7 @@ function recommendations(){
   var mf = monthKey(todayD());
   var expenseActual = categoryActuals('expense', todayD());
   Object.keys(DB.budget).forEach(function(cat){
-    if(EXPENSE_CATEGORIES.indexOf(cat)<0) return;
+    if(budgetKind(cat)!=='expense') return;
     var plan = DB.budget[cat]; var fact = expenseActual[cat]||0;
     if(plan>0 && fact > plan*1.2){
       recs.push({level:'warn',title:'Перерасход по категории «'+cat+'»',text:'Факт '+fmtMoney(fact)+' против плана '+fmtMoney(plan)+' ('+fmtPct((fact/plan-1)*100,0)+' сверх плана) в этом месяце.'});
@@ -1243,11 +1257,10 @@ function openGoalModal(id){
 
 /* ---- Budget ---- */
 function renderBudget(c){
-  var incomeCats = Object.keys(DB.budget).filter(function(k){return INCOME_CATEGORIES.indexOf(k)>=0;});
-  var expenseCats = Object.keys(DB.budget).filter(function(k){return EXPENSE_CATEGORIES.indexOf(k)>=0;});
-  var otherCats = Object.keys(DB.budget).filter(function(k){return incomeCats.indexOf(k)<0 && expenseCats.indexOf(k)<0;});
+  var incomeCats = Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='income';});
+  var expenseCats = Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='expense';});
   var totalIncome = incomeCats.reduce(function(s,k){return s+DB.budget[k];},0);
-  var totalExpense = expenseCats.concat(otherCats).reduce(function(s,k){return s+DB.budget[k];},0);
+  var totalExpense = expenseCats.reduce(function(s,k){return s+DB.budget[k];},0);
   function rows(cats, cls){
     return cats.map(function(k){
       return '<tr><td>'+esc(k)+'</td><td class="num '+cls+'">'+fmtMoney(DB.budget[k])+'</td>'+
@@ -1260,7 +1273,7 @@ function renderBudget(c){
       '<div class="grid-2">'+
       '<div><h4 class="ui" style="font-size:13px;margin:0 0 8px;">Доходы</h4><div class="table-wrap"><table>'+rows(incomeCats,'text-good')+'</table></div>'+
         '<div style="margin-top:6px;font-weight:700;" class="num">Итого: '+fmtMoney(totalIncome)+'</div></div>'+
-      '<div><h4 class="ui" style="font-size:13px;margin:0 0 8px;">Расходы</h4><div class="table-wrap"><table>'+rows(expenseCats.concat(otherCats),'text-bad')+'</table></div>'+
+      '<div><h4 class="ui" style="font-size:13px;margin:0 0 8px;">Расходы</h4><div class="table-wrap"><table>'+rows(expenseCats,'text-bad')+'</table></div>'+
         '<div style="margin-top:6px;font-weight:700;" class="num">Итого: '+fmtMoney(totalExpense)+'</div></div>'+
       '</div>'+
       '<div class="card" style="margin-top:16px;background:var(--surface-2);"><div style="display:flex;justify-content:space-between;align-items:center;">'+
@@ -1276,22 +1289,19 @@ function renderBudget(c){
   }); });
 }
 function openBudgetModal(catKey){
-  var isIncome = catKey && INCOME_CATEGORIES.indexOf(catKey)>=0;
   formModal({
     title: catKey?'Изменить план':'Новая категория бюджета',
-    initial: catKey?{category:catKey, amount:DB.budget[catKey], kind:isIncome?'income':'expense'}:{kind:'expense'},
-    fields: catKey ? [
-      {key:'category',label:'Категория',type:'text'},
-      {key:'amount',label:'Плановая сумма в месяц',type:'number',step:'0.01'}
-    ] : [
+    initial: catKey?{category:catKey, amount:DB.budget[catKey], kind:budgetKind(catKey)}:{kind:'expense'},
+    fields:[
       {key:'kind',label:'Тип',type:'select',options:[['expense','Расход'],['income','Доход']],half:true},
       {key:'category',label:'Категория',type:'text',half:true},
       {key:'amount',label:'Плановая сумма в месяц',type:'number',step:'0.01'}
     ],
-    onDelete: catKey? function(){ delete DB.budget[catKey]; save(); goTo('budget'); } : null,
+    onDelete: catKey? function(){ delete DB.budget[catKey]; delete DB.budgetKind[catKey]; save(); goTo('budget'); } : null,
     onSave: function(v){
-      if(catKey && v.category!==catKey) delete DB.budget[catKey];
+      if(catKey && v.category!==catKey){ delete DB.budget[catKey]; delete DB.budgetKind[catKey]; }
       DB.budget[v.category]=v.amount;
+      DB.budgetKind[v.category]=v.kind;
       save(); goTo('budget');
     }
   });
@@ -1305,7 +1315,7 @@ function renderPlanFact(c){
   var actualInc = categoryActuals('income', monthDate);
   var cats = Object.keys(DB.budget);
   var rows = cats.map(function(k){
-    var isIncome = INCOME_CATEGORIES.indexOf(k)>=0;
+    var isIncome = budgetKind(k)==='income';
     var plan = DB.budget[k];
     var fact = isIncome ? (actualInc[k]||0) : (actualExp[k]||0);
     var dev = fact-plan;
@@ -1473,8 +1483,8 @@ function renderAI(c){
 function renderAnnual(c){
   var months = [];
   for(var i=0;i<12;i++) months.push(addMonths(todayD(), i));
-  var incomeCats = Object.keys(DB.budget).filter(function(k){return INCOME_CATEGORIES.indexOf(k)>=0;});
-  var expenseCats = Object.keys(DB.budget).filter(function(k){return INCOME_CATEGORIES.indexOf(k)<0;});
+  var incomeCats = Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='income';});
+  var expenseCats = Object.keys(DB.budget).filter(function(k){return budgetKind(k)==='expense';});
   var planIncome = incomeCats.reduce(function(s,k){return s+DB.budget[k];},0);
   var planExpense = expenseCats.reduce(function(s,k){return s+DB.budget[k];},0);
 
