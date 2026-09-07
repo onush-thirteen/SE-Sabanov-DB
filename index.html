@@ -1289,20 +1289,27 @@ function renderBudget(c){
   }); });
 }
 function openBudgetModal(catKey){
+  var fields = [
+    {key:'kind',label:'Тип',type:'select',options:[['expense','Расход'],['income','Доход']],half:true},
+    {key:'category',label:'Категория',type:'text',half:true},
+    {key:'amount',label:'Плановая сумма в месяц',type:'number',step:'0.01'}
+  ];
+  if(!catKey){
+    fields.push({key:'logTx',label:'Также записать операцию сегодняшним днём в «Доходы и расходы»',type:'checkbox',default:true});
+  }
   formModal({
     title: catKey?'Изменить план':'Новая категория бюджета',
     initial: catKey?{category:catKey, amount:DB.budget[catKey], kind:budgetKind(catKey)}:{kind:'expense'},
-    fields:[
-      {key:'kind',label:'Тип',type:'select',options:[['expense','Расход'],['income','Доход']],half:true},
-      {key:'category',label:'Категория',type:'text',half:true},
-      {key:'amount',label:'Плановая сумма в месяц',type:'number',step:'0.01'}
-    ],
+    fields: fields,
     onDelete: catKey? function(){ delete DB.budget[catKey]; delete DB.budgetKind[catKey]; save(); goTo('budget'); } : null,
     onSave: function(v){
       if(catKey && v.category!==catKey){ delete DB.budget[catKey]; delete DB.budgetKind[catKey]; }
       DB.budget[v.category]=v.amount;
       DB.budgetKind[v.category]=v.kind;
-      save(); goTo('budget');
+      if(!catKey && v.logTx && v.amount>0){
+        DB.transactions.push({id:uid(), date:toISO(todayD()), type:v.kind, category:v.category, amount:v.amount, account:(DB.accounts[0]?DB.accounts[0].id:''), note:'Из бюджета'});
+      }
+      ensureSnapshot(); save(); goTo('budget');
     }
   });
 }
